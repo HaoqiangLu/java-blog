@@ -1,0 +1,16 @@
+# [K8s] PVC — Kafka 日志持久化存储
+# 与 Docker Compose 对比：相当于 volumes: kafka-data:/tmp/kraft-combined-logs
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kafka-pvc
+  namespace: blog-platform
+  labels:
+    app.kubernetes.io/name: kafka
+spec:
+  storageClassName: "standard"
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

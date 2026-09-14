@@ -1,0 +1,18 @@
+# [K8s] ClusterIP Service — 为 PostgreSQL 提供集群内 DNS 和负载均衡
+# 与 Docker Compose 对比：相当于 networks: blog-network 中的服务发现
+# 其他 Pod 通过 postgres-svc.blog-platform.svc.cluster.local:5432 访问
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-svc
+  namespace: blog-platform
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  type: ClusterIP  # [K8s] 仅集群内可访问 — 数据库不暴露到外部
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: postgres

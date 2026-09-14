@@ -1,0 +1,14 @@
+[
+  {
+    "name": "post-events",
+    "partitions": 3,
+    "replication_factor": 1,
+    "config": { "retention.ms": "604800000" }
+  },
+  {
+    "name": "user-notifications",
+    "partitions": 3,
+    "replication_factor": 1,
+    "config": { "retention.ms": "86400000" }
+  }
+]

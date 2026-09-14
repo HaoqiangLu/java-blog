@@ -1,0 +1,9 @@
+# [K8s] Namespace — 将博客平台所有资源隔离在独立命名空间，便于权限控制和资源清理
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: blog-platform
+  labels:
+    app.kubernetes.io/part-of: blog-platform
+    # [K8s] 标签用于 kubectl 按标签筛选资源：kubectl -n blog-platform get all
+    team: backend

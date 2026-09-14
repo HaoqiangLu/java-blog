@@ -1,0 +1,85 @@
+# [K8s] Redis Deployment — 单副本缓存服务
+# 与 Docker Compose 对比：相当于 redis service + command + resources
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: blog-platform
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: blog-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+    spec:
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          # [K8s] 启动命令 — 对应 Docker Compose command 字段
+          # 配置密码、AOF 持久化、内存上限和淘汰策略
+          command:
+            - redis-server
+            - --requirepass
+            - $(REDIS_PASSWORD)
+            - --appendonly
+            - "yes"
+            - --maxmemory
+            - "256mb"
+            - --maxmemory-policy
+            - allkeys-lru
+          ports:
+            - containerPort: 6379
+              name: redis
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: blog-secret
+                  key: redis-password
+
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          # [K8s] 存活探针 — redis-cli ping 返回 PONG 表示存活
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+
+          # [K8s] 就绪探针
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+          volumeMounts:
+            - name: redis-storage
+              mountPath: /data
+
+      volumes:
+        - name: redis-storage
+          persistentVolumeClaim:
+            claimName: redis-pvc

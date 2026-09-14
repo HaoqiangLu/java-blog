@@ -1,0 +1,21 @@
+# [Spring Profile] 生产环境配置 — 覆盖 application.yml 中的公共配置
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate        # [生产] 只校验不修改，Flyway 负责迁移
+    show-sql: false             # [生产] 不打印 SQL
+
+  # [生产] 连接池调大
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 10
+
+  flyway:
+    enabled: true               # [生产] 必须启用 Flyway
+
+logging:
+  level:
+    root: WARN
+    com.blog: INFO
+    org.hibernate.SQL: WARN

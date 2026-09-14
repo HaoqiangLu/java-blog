@@ -1,0 +1,37 @@
+# [Docker] 前端多阶段构建 — Node 编译 + Nginx 托管
+
+# ---- 阶段 1：编译 ----
+FROM node:24-alpine AS builder
+
+WORKDIR /app
+
+# [Docker] 先复制 package 文件 — 利用层缓存
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+
+# [pnpm] 安装依赖 — 只在 package.json 变化时重新安装
+RUN corepack enable && pnpm install --frozen-lockfile
+
+# 复制源代码
+COPY frontend/ ./
+
+# [Vite] 生产构建前注入前端运行时环境变量
+# VITE_API_URL：留空即用相对路径 /api（走 nginx 反代，推荐，无需改）
+# VITE_WS_URL：WebSocket 地址。HTTPS 部署必须用 wss:// 且经 nginx（如 wss://myblog.local/ws/chat），
+#             否则前端默认的 ws://localhost:8080 会被浏览器当作「混合内容」拦截，聊天功能失效。
+ARG VITE_API_URL=""
+ARG VITE_WS_URL=""
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_WS_URL=$VITE_WS_URL
+
+# [Vite] 生产构建
+RUN pnpm build
+
+# ---- 阶段 2：Nginx 托管 ----
+FROM nginx:1.27-alpine
+
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY docker/frontend-nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

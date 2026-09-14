@@ -1,0 +1,65 @@
+# [K8s] HPA — Horizontal Pod Autoscaler 根据指标自动增减 Pod 副本数
+# 与 Docker Compose 对比：Compose 无自动扩缩容能力，需手动调整 replicas
+#
+# 工作原理：
+#   1. metrics-server 每 15 秒采集 Pod 的 CPU/内存使用率
+#   2. HPA Controller 每 15 秒查询 metrics-server
+#   3. 当平均 CPU 使用率 > 70% 时，增加 Pod 副本数
+#   4. 当平均 CPU 使用率 < 30% 时，减少 Pod 副本数
+#   5. 副本数范围限制在 [minReplicas, maxReplicas] 之间
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+  namespace: blog-platform
+  labels:
+    app.kubernetes.io/name: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  # [K8s] 副本数范围 — 最少 2 个保证高可用，最多 10 个防止资源耗尽
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    # [K8s] CPU 指标 — 当平均 CPU 使用率超过 70% 时触发扩容
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    # [K8s] 内存指标 — 当平均内存使用率超过 80% 时触发扩容
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  # [K8s] 扩缩容行为策略 — 精细控制扩缩速度
+  behavior:
+    scaleUp:
+      # [K8s] 扩容策略 — 激进扩容，60 秒内持续扩容
+      stabilizationWindowSeconds: 60
+      policies:
+        # 每 60 秒最多增加 2 个 Pod
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+        # 每 60 秒最多增加当前副本数的 50%
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+      selectPolicy: Max  # 选择两个策略中扩容数更大的
+
+    scaleDown:
+      # [K8s] 缩容策略 — 保守缩容，300 秒稳定窗口防止频繁抖动
+      stabilizationWindowSeconds: 300
+      policies:
+        # 每 120 秒最多减少 1 个 Pod — 防止缩容过快导致服务中断
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+      selectPolicy: Min  # 选择缩容数更小的策略

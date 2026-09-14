@@ -1,0 +1,98 @@
+# [K8s] PostgreSQL Deployment — 单副本有状态服务
+# 与 Docker Compose 对比：相当于 postgres service + healthcheck + resources
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: blog-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: blog-platform
+spec:
+  replicas: 1  # [K8s] 数据库单副本 — 生产环境建议使用 StatefulSet + 主从复制
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      # [K8s] 优雅终止宽限期 — 给数据库 30 秒完成连接排空
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+
+          # [K8s] 环境变量 — 从 ConfigMap 和 Secret 注入，类似 Docker Compose environment
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: blog-secret
+                  key: pg-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: blog-secret
+                  key: pg-password
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: blog-config
+                  key: PG_DATABASE
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+
+          # [K8s] 资源限制 — 对应 Docker Compose deploy.resources.limits
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+
+          # [K8s] 存活探针 — 检测容器是否存活，失败则重启容器
+          # 对应 Docker Compose healthcheck: pg_isready
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # [K8s] 就绪探针 — 检测 Pod 是否可以接收流量，失败则从 Service 端点移除
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 5
+
+          # [K8s] 挂载持久卷 — 对应 Docker Compose volumes: pg-data
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+        - name: init-scripts
+          configMap:
+            name: postgres-init
+            optional: true

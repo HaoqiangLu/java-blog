@@ -1,0 +1,99 @@
+# [K8s] Ingress — 集群入口网关，替代 Docker Compose 中的 Nginx 反向代理容器
+#
+# 与 Docker Compose 对比：
+#   Docker Compose: Nginx 容器 → upstream backend/frontend → 手动配置 proxy_pass
+#   Kubernetes:     Ingress Controller → Ingress 规则 → 自动路由到 Service
+#
+# 前置条件：集群已安装 Nginx Ingress Controller
+#   helm install ingress-nginx ingress-nginx/ingress-nginx \
+#     --namespace ingress-nginx --create-namespace
+#
+# Ingress Controller 本身是一个 Deployment + LoadBalancer Service
+# 它监听 Ingress 资源变化，自动生成 Nginx 配置并热加载
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: blog-ingress
+  namespace: blog-platform
+  labels:
+    app.kubernetes.io/part-of: blog-platform
+  annotations:
+    # [Nginx Ingress] 使用 Nginx Ingress Controller
+    kubernetes.io/ingress.class: nginx
+
+    # [Nginx Ingress] SSL 重定向 — 对应 Docker Compose Nginx 的 HTTP→HTTPS 301
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+    # [Nginx Ingress] WebSocket 支持 — 对应原 Nginx 配置中的 Upgrade/Connection 头
+    # 这是 K8s Ingress 处理 WebSocket 的关键注解
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/server-snippets: |
+      location /ws/ {
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+      }
+
+    # [Nginx Ingress] 安全头 — configuration-snippet 在 v1.12 被视为 risky annotation，会导致路由被拒绝
+    # 安全头改由后端 SecurityConfig 或 Ingress Controller 全局配置处理
+    # nginx.ingress.kubernetes.io/configuration-snippet: |
+    #   add_header X-Frame-Options "SAMEORIGIN" always;
+    #   add_header X-Content-Type-Options "nosniff" always;
+    #   add_header X-XSS-Protection "1; mode=block" always;
+    #   add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # [Nginx Ingress] 请求体大小限制 — 对应 client_max_body_size 10M
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+    # [Nginx Ingress] gzip 压缩 — 对应原 Nginx gzip on
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+
+    # [Nginx Ingress] 限流 — 对应原 RateLimitFilter 令牌桶
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+
+    # [cert-manager] 自动 SSL 证书 — 替代 Docker Compose 中的 certbot 容器
+    # 前置条件：安装 cert-manager（helm install cert-manager jetstack/cert-manager）
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+spec:
+  # [K8s] TLS 终止 — Ingress Controller 处理 HTTPS，后端只需 HTTP
+  # 对应 Docker Compose Nginx 的 ssl_certificate / ssl_certificate_key
+  tls:
+    - hosts:
+        - myblog.local
+      secretName: blog-tls-secret  # cert-manager 自动创建并续期证书
+
+  rules:
+    - host: myblog.local
+      http:
+        paths:
+          # [K8s] /api 路径 → 后端 Service
+          # 对应原 Nginx: location /api/ { proxy_pass http://backend; }
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-svc
+                port:
+                  number: 8080
+
+          # [K8s] /ws 路径 → 后端 Service（WebSocket）
+          # 对应原 Nginx: location /ws/ { proxy_pass http://backend; Upgrade... }
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-svc
+                port:
+                  number: 8080
+
+          # [K8s] / 路径 → 前端 Service（React SPA）
+          # 对应原 Nginx: location / { proxy_pass http://frontend; }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-svc
+                port:
+                  number: 80

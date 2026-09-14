@@ -1,0 +1,60 @@
+# [K8s] Frontend Deployment — Nginx 托管 React 静态文件
+# 与 Docker Compose 对比：相当于 frontend service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: blog-platform
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: blog-platform
+spec:
+  replicas: 2
+
+  # [K8s] 前端也使用滚动更新 — 静态文件更新时零停机
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: frontend
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: frontend
+          image: docker-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+
+          # [K8s] 存活探针 — Nginx 进程是否存活
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          # [K8s] 就绪探针 — 静态文件是否可以访问
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 5

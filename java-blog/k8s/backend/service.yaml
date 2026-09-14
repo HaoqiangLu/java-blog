@@ -1,0 +1,19 @@
+# [K8s] Backend ClusterIP Service — 为后端 Pod 提供集群内负载均衡
+# 与 Docker Compose 对比：相当于 Nginx upstream backend { server backend:8080; }
+# K8s Service 自动在所有匹配 Pod 之间轮询（kube-proxy iptables/IPVS）
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-svc
+  namespace: blog-platform
+  labels:
+    app.kubernetes.io/name: backend
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: backend

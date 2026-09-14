@@ -1,0 +1,29 @@
+# Java 构建产物
+backend/target/
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 环境配置
+.env
+.env.local
+.env.production
+
+# 日志
+*.log
+
+# SSL 证书（本地生成，不应提交）
+# 忽略 ssl 目录下的所有直接文件/子目录
+nginx/ssl/*
+# 不忽略 .gitkeep 占位文件（保证目录结构被提交）
+!nginx/ssl/.gitkeep

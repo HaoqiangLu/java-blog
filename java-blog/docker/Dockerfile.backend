@@ -1,0 +1,43 @@
+# [Docker] 多阶段构建 — Maven 编译阶段 + JRE 运行阶段，减小最终镜像体积
+
+# ---- 阶段 1：编译 ----
+# [Docker] 编译阶段 — 必须用自带 Maven 的镜像
+# ⚠️ eclipse-temurin:25-jdk 只含 JDK、不含 mvn，直接 RUN mvn 会报 command not found 导致构建失败。
+#    builder 阶段改用官方 maven 镜像（内含 JDK 25 + Maven 3.9）；运行阶段仍用精简 JRE。
+FROM maven:3.9-eclipse-temurin-25 AS builder
+
+WORKDIR /build
+
+# [Docker] 先复制 pom.xml — 利用 Docker 层缓存加速依赖下载
+COPY backend/pom.xml ./
+RUN mvn dependency:go-offline -B
+
+# 复制源代码
+COPY backend/ ./
+
+# [Maven] 打包为可执行 fat JAR（跳过测试，测试在 CI 阶段单独执行）
+RUN mvn package -DskipTests -B
+
+# ---- 阶段 2：运行 ----
+# [Docker] 运行阶段 — 只包含 JRE，镜像更小
+FROM eclipse-temurin:25-jre-alpine
+
+WORKDIR /app
+
+# 从编译阶段复制 JAR 文件
+COPY --from=builder /build/target/blog-backend-*.jar ./app.jar
+
+# 创建日志目录
+RUN mkdir -p logs
+
+# [JVM] 优化容器内 JVM 参数
+ENV JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+
+EXPOSE 8080
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD wget -qO- http://localhost:8080/api/health || exit 1
+
+# [Docker] 运行 Spring Boot 应用
+CMD ["sh", "-c", "java $JAVA_OPTS -jar app.jar --spring.profiles.active=prod"]

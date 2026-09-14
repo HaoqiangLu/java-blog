@@ -1,0 +1,148 @@
+# [K8s] Backend Deployment — 双副本 + 滚动更新 + 资源限制
+# 与 Docker Compose 对比：相当于 backend service × replicas:2 + depends_on
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: blog-platform
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: blog-platform
+    app.kubernetes.io/version: "1.0.0"  # [K8s] 版本标签 — 用于滚动更新追踪
+spec:
+  replicas: 2  # [K8s] 双副本 — 对应 Docker Compose replicas: 2
+
+  # [K8s] 滚动更新策略 — 核心！零停机部署
+  # 与 Docker Compose 对比：Docker Compose 无内建滚动更新，需手动操作
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # [K8s] 滚动更新时最多超出期望副本数的 Pod 数
+      # maxSurge=1 表示更新期间最多 3 个 Pod（2 正常 + 1 新）
+      maxSurge: 1
+      # [K8s] 滚动更新时最多不可用的 Pod 数
+      # maxUnavailable=0 表示更新期间始终保持 2 个 Pod 可用 → 零停机
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backend
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      # [K8s] 优雅终止宽限期 — SIGTERM 后等待请求处理完成
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: backend
+          # [K8s] 镜像 — 本地练习使用 Docker Compose 构建的镜像
+          # 生产环境改为 CI/CD 推送的 registry 地址（如 ghcr.io/your-org/blog-backend:v1.0.0）
+          image: docker-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+
+          # [K8s] 环境变量 — 从 ConfigMap + Secret 注入
+          # 对应 Docker Compose environment 列表
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres-svc:5432/blogdb_prod"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: blog-secret
+                  key: pg-user
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: blog-secret
+                  key: pg-password
+            - name: SPRING_DATA_REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: blog-config
+                  key: REDIS_HOST
+            - name: SPRING_DATA_REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: blog-config
+                  key: REDIS_PORT
+            - name: SPRING_DATA_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: blog-secret
+                  key: redis-password
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka-svc:9092"
+            # [K8s] AI 服务地址 — Pod 内 localhost 是 Pod 自己，宿主机用 host.docker.internal
+            - name: APP_AI_PROVIDERS_OLLAMA_BASEURL
+              value: "http://host.docker.internal:11434"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: blog-secret
+                  key: jwt-secret
+            - name: APP_JWT_EXPIRATION
+              valueFrom:
+                configMapKeyRef:
+                  name: blog-config
+                  key: APP_JWT_EXPIRATION
+            - name: APP_JWT_REFRESH_EXPIRATION
+              valueFrom:
+                configMapKeyRef:
+                  name: blog-config
+                  key: APP_JWT_REFRESH_EXPIRATION
+            - name: SPRING_PROFILES_ACTIVE
+              valueFrom:
+                configMapKeyRef:
+                  name: blog-config
+                  key: SPRING_PROFILES_ACTIVE
+            - name: CORS_ORIGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: blog-config
+                  key: CORS_ORIGIN
+
+          # [K8s] 资源限制 — 对应 Docker Compose deploy.resources.limits
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+
+          # [K8s] 存活探针 — 对应 Dockerfile HEALTHCHECK
+          # 失败则重启容器（Pod 级别重启，非进程级别）
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 45  # [K8s] 启动等待 — Spring Boot JVM 预热需要较长时间
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # [K8s] 就绪探针 — 确保 Pod 可以接收流量后才加入 Service 端点
+          # 与 Docker Compose 对比：Compose 无就绪探针概念
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # [K8s] 启动探针 — 区分「启动慢」和「运行中卡死」
+          # 启动期间只做存活检查，启动完成后切换为 readiness + liveness
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 2

@@ -1,0 +1,102 @@
+server:
+  port: ${BACKEND_PORT:8080}
+
+spring:
+  application:
+    name: blog-platform
+
+  # ---- PostgreSQL 数据源 ----
+  datasource:
+    url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/${PG_DATABASE:blogdb}
+    username: ${PG_USER:bloguser}
+    password: ${PG_PASSWORD:blogpass123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+
+  # ---- Spring Data JPA ----
+  jpa:
+    hibernate:
+      ddl-auto: validate    # 表结构由 Flyway 管理，Hibernate 只做校验
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        # Spring Boot 3.x + Hibernate 6 自动根据 JDBC URL 检测 dialect，无需手动指定
+
+  # ---- Flyway 数据库迁移 ----
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+
+  # ---- Spring Data Redis ----
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:redispass123}
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 4
+
+  # Kafka 配置
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+    consumer:
+      group-id: blog-platform
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+
+# ---- 日志配置 ----
+logging:
+  level:
+    root: INFO
+    com.blog: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# ---- 自定义配置 ----
+app:
+  jwt:
+    secret: ${JWT_SECRET:your-super-secret-jwt-key-change-in-production}
+    expiration: ${JWT_EXPIRATION:3600}         # Access Token 过期时间（秒）
+    refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800}  # Refresh Token（7天）
+
+  cors:
+    allowed-origins: ${CORS_ORIGIN:http://localhost:5173}
+
+  # AI 多 Provider 配置
+  ai:
+    default-provider: ollama   # 默认走 Ollama
+    providers:
+      # ---- 本地免费：Ollama 直连 ----
+      ollama:
+        baseUrl: http://localhost:11434   # Ollama 本地服务地址
+        apiKey: not-used                  # 本地模型不需要真实 Key
+        model: qwen3.5                    # Ollama 中已拉取的模型名
+        nativeApi: true
+      # ---- 云端付费：OpenAI ----
+      openai:
+        baseUrl: https://api.openai.com
+        apiKey: ${OPENAI_API_KEY:}
+        model: gpt-3.5-turbo
+      # ---- 云端付费：DeepSeek ----
+      deepseek:
+        baseUrl: https://api.deepseek.com
+        apiKey: ${DEEPSEEK_API_KEY:}
+        model: deepseek-chat

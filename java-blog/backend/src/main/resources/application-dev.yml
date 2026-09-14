@@ -1,0 +1,17 @@
+# [Spring Profile] 开发环境配置 — 覆盖 application.yml 中的公共配置
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: update          # [开发] 自动更新表结构，无需手动运行 Flyway
+    show-sql: true              # [开发] 控制台打印 SQL，便于调试
+
+  # [开发] Flyway 在开发环境可选择关闭，Hibernate ddl-auto 已足够
+  flyway:
+    enabled: false
+
+logging:
+  level:
+    root: INFO
+    com.blog: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
