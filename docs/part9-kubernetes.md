@@ -671,7 +671,7 @@ spec:
 
 ## 9.8 后端 — Spring Boot 服务
 
-### 9.7.1 Deployment（含滚动更新策略）
+### 9.8.1 Deployment（含滚动更新策略）
 
 ```yaml
 # k8s/backend/deployment.yaml
@@ -826,7 +826,7 @@ spec:
             periodSeconds: 2
 ```
 
-### 9.7.2 Service
+### 9.8.2 Service
 
 ```yaml
 # k8s/backend/service.yaml
@@ -851,7 +851,7 @@ spec:
     app.kubernetes.io/name: backend
 ```
 
-### 9.7.3 HPA — 水平自动扩缩容
+### 9.8.3 HPA — 水平自动扩缩容
 
 ```yaml
 # k8s/backend/hpa.yaml
@@ -926,7 +926,7 @@ spec:
 
 ## 9.9 前端 — React SPA 静态服务
 
-### 9.8.1 Deployment
+### 9.9.1 Deployment
 
 ```yaml
 # k8s/frontend/deployment.yaml
@@ -992,7 +992,7 @@ spec:
             periodSeconds: 5
 ```
 
-### 9.8.2 Service
+### 9.9.2 Service
 
 ```yaml
 # k8s/frontend/service.yaml
