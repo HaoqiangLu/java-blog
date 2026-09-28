@@ -267,6 +267,7 @@ public class User {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(columnDefinition = "uuid")   // 数据库列类型显式声明为 uuid
     private UUID id;
 
     @Column(nullable = false, unique = true, length = 255)
@@ -454,7 +455,7 @@ app:
     refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800}  # Refresh Token（7天）
 
   cors:
-    allowed-origins: ${CORS_ORIGIN:http://localhost:3000}
+    allowed-origins: ${CORS_ORIGIN:http://localhost:5173}
 ```
 
 ### 2.4.4 JwtTokenProvider
@@ -906,7 +907,7 @@ public class AuthService {
                 .build();
         user = userRepository.save(user);
 
-        return Map.of("message", "Registered", "user_id", user.getId().toString());
+        return Map.of("message", "Registered", "user_id", user.getId());
     }
 
     public AuthResponse login(LoginRequest request) {
@@ -922,7 +923,7 @@ public class AuthService {
         String refreshToken = tokenProvider.generateRefreshToken(user.getId().toString());
 
         Map<String, Object> userMap = new HashMap<>();
-        userMap.put("id", user.getId().toString());
+        userMap.put("id", user.getId());
         userMap.put("username", user.getUsername());
         userMap.put("email", user.getEmail());
         userMap.put("displayName", user.getDisplayName());

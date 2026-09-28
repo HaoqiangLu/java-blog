@@ -209,7 +209,7 @@ public class ChatMessage {
     private UUID replyToId;
 
     @PrePersist
-    protected void onCreate() {
+    protected void onCreated() {
         createdAt = Instant.now();
     }
 }
@@ -244,6 +244,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Repository
@@ -252,7 +254,8 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, UUID> 
     Page<ChatMessage> findByRoomIdOrderByCreatedAtDesc(UUID roomId, Pageable pageable);
 
     Page<ChatMessage> findByRoomIdAndCreatedAtBeforeOrderByCreatedAtDesc(
-            UUID roomId, java.time.Instant before, Pageable pageable);
+            UUID roomId, Instant before, Pageable pageable
+    );
 }
 ```
 
@@ -334,6 +337,7 @@ EXPIRE rate:192.168.1.1:/api/posts 60
 // [WebSocket] 聊天消息 DTO — 客户端发送的消息结构
 package com.blog.websocket;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 @Data
@@ -430,7 +434,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.*;
 
 @Service
@@ -639,7 +642,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         log.info("WebSocket connected: user={} ({})", username, userId);
     }
 
-    @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
         String userId = getUserId(session);
         try {
@@ -713,11 +715,11 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     }
 
     private String getUserId(WebSocketSession session) {
-        return (String) session.getAttributes().get("userId");
+        return session.getAttributes().get("userId").toString();
     }
 
     private String getUsername(WebSocketSession session) {
-        return (String) session.getAttributes().get("username");
+        return session.getAttributes().get("username").toString();
     }
 
     private String toJson(Object obj) {
@@ -933,9 +935,9 @@ public class ChatRoomService {
     }
 
     @Transactional(readOnly = true)
-    public ChatRoom getRoom(String roomId) {
-        return chatRoomRepository.findById(UUID.fromString(roomId))
-                .orElseThrow(() -> new RuntimeException("Chat room not found"));
+    public ChatRoom getRoom(UUID roomId) {
+        return chatRoomRepository.findById(roomId)
+                .orElseThrow(() -> new RuntimeException("Room not found"));
     }
 }
 ```
@@ -990,7 +992,7 @@ public class ChatRoomController {
     @GetMapping("/{roomId}")
     public ResponseEntity<ChatRoom> getRoom(@PathVariable String roomId) {
         // [REST] GET /api/chat-rooms/{id} — 获取单个房间详情
-        return ResponseEntity.ok(chatRoomService.getRoom(roomId));
+        return ResponseEntity.ok(chatRoomService.getRoom(UUID.fromString(roomId)));
     }
 }
 ```
@@ -1001,34 +1003,10 @@ public class ChatRoomController {
 
 > **注意**：如果前端在未登录状态下访问 `/api/chat-rooms`，会返回 401。这是预期行为。
 
-### 4.11.4 默认聊天室种子数据
+### 4.11.4 关于默认聊天室
 
-> **说明**：创建文件 `backend/src/main/resources/db/migration/V007__insert_default_chat_rooms.sql`。
-> 应用重启后 Flyway 自动执行，向 `chat_rooms` 表插入三条默认房间记录。
-
-```sql
--- backend/src/main/resources/db/migration/V007__insert_default_chat_rooms.sql
--- [Flyway] 种子数据 — 插入默认聊天室，确保用户首次进入聊天页面时有房间可选
-
-INSERT INTO chat_rooms (id, name, description, room_type, is_active, created_at, updated_at)
-VALUES 
-    (gen_random_uuid(), 'General', 'General discussion room', 'group', true, NOW(), NOW()),
-    (gen_random_uuid(), 'Tech Talk', 'Technology discussions', 'group', true, NOW(), NOW()),
-    (gen_random_uuid(), 'Random', 'Random topics', 'group', true, NOW(), NOW());
-```
-
-> **验证**：重启应用后，通过以下 PowerShell 命令确认房间已创建：
->
-> ```powershell
-> # 先登录获取 token
-> $loginResp = Invoke-RestMethod -Uri 'http://localhost:8080/api/auth/login' -Method POST -ContentType 'application/json' -Body '{"email":"alice@example.com","password":"Test1234!"}'
-> $token = $loginResp.access_token
->
-> # 查询聊天室列表
-> Invoke-RestMethod -Uri 'http://localhost:8080/api/chat-rooms' -Headers @{Authorization="Bearer $token"}
-> ```
->
-> 预期返回包含 3 个房间的 JSON 数组。
+> **说明**：本项目**不预置**默认聊天室种子数据——`db/migration/` 下只有 V001-V006，没有向 `chat_rooms` 插入记录的迁移文件。
+> 用户首次进入聊天页面时房间列表为空，可通过 §4.11.2 的 `POST /api/chat-rooms` 接口自行创建房间（§4.11.5 的删除接口验证也会先用该接口创建一个测试房间）。
 
 
 ### 4.11.5 删除房间接口（仅创建者可删除）
@@ -1042,12 +1020,12 @@ VALUES
 // [增量修改] ChatRoomService.java — 追加删除房间方法
 
     @Transactional
-    public void deleteRoom(String roomId, String currentUserId) {
-        ChatRoom room = chatRoomRepository.findById(UUID.fromString(roomId))
+    public void deleteRoom(UUID roomId, UUID currentUserId) {
+        ChatRoom room = chatRoomRepository.findById(roomId)
                 .orElseThrow(() -> new BusinessException(404, "Chat room not found"));
 
         // [权限校验] 只有创建者才能删除
-        if (!currentUserId.equals(room.getCreatedBy().toString())) {
+        if (!currentUserId.equals(room.getCreatedBy())) {
             throw new BusinessException(403, "Only the room creator can delete this room");
         }
 
@@ -1057,7 +1035,7 @@ VALUES
     }
 ```
 
-> **注意**：`BusinessException` 已在 `com.blog.exception` 包中（Part 3 文章功能已创建），此处直接复用。
+> **注意**：`deleteRoom` 用到 `BusinessException`，需在 `ChatRoomService.java` 顶部追加 `import com.blog.exception.BusinessException;`（该类在 Part 3 文章功能已创建，此处直接复用）。
 
 **增量修改 ChatRoomController** — 在 `getRoom(...)` 方法之后追加 `deleteRoom` 端点：
 
@@ -1070,11 +1048,11 @@ VALUES
             Authentication auth) {
         // [REST] DELETE /api/chat-rooms/{id} — 删除房间（仅创建者可操作）
         UUID userId = UUID.fromString((String) auth.getPrincipal());
-        chatRoomService.deleteRoom(roomId, userId.toString());
+        chatRoomService.deleteRoom(UUID.fromString(roomId), userId);
 
-        // [WebSocket] 通知房间内所有在线用户：房间已删除
+        // 通知房间内所有在线用户：房间已删除
         Set<String> members = connectionManager.getRoomMembers(roomId);
-        String msg = toJson(ServerMessage.roomDeleted(roomId));
+        String msg = "{\"type\":\"room_deleted\",\"room_id\":\"" + roomId + "\"}";
         for (String m : members) {
             connectionManager.sendToUser(m, msg);
         }
@@ -1085,11 +1063,10 @@ VALUES
     }
 ```
 
-> 需要在类中注入 `ConnectionManager` 和 `ObjectMapper`（用于 `toJson`），并在文件顶部追加 import：
+> 需要在类中注入 `ConnectionManager`（用于获取房间在线成员并推送删除通知），并在文件顶部追加 import：
 >
 > ```java
 > import com.blog.websocket.ConnectionManager;
-> import com.blog.websocket.ServerMessage;
 > import java.util.Set;
 > ```
 >
@@ -1098,24 +1075,14 @@ VALUES
 > ```java
 > private final ChatRoomService chatRoomService;
 > private final ConnectionManager connectionManager;
-> private final ObjectMapper objectMapper;
 >
-> public ChatRoomController(ChatRoomService chatRoomService,
->                           ConnectionManager connectionManager,
->                           ObjectMapper objectMapper) {
+> public ChatRoomController(ChatRoomService chatRoomService, ConnectionManager connectionManager) {
 >     this.chatRoomService = chatRoomService;
 >     this.connectionManager = connectionManager;
->     this.objectMapper = objectMapper;
-> }
->
-> private String toJson(Object obj) {
->     try {
->         return objectMapper.writeValueAsString(obj);
->     } catch (Exception e) {
->         return "{}";
->     }
 > }
 > ```
+>
+> **说明**：删除通知直接用字符串拼接构造 `room_deleted` JSON（见上方 `deleteRoom`），源码并未注入 `ObjectMapper`，也不使用 `ServerMessage`，因此无需 `toJson` 辅助方法。
 
 > **验证**：
 >

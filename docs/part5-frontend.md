@@ -790,8 +790,8 @@ export const useChatStore = create<ChatState>()((set) => ({
   setWsConnected: (connected) => set({ wsConnected: connected }),
 
   removeRoom: (roomId) => set((state) => {
-    const { [roomId]: _msg, ...restMessages } = state.messages;
-    const { [roomId]: _unread, ...restUnread } = state.unreadCounts;
+    const { [roomId]: _, ...restMessages } = state.messages;
+    const { [roomId]: __, ...restUnread } = state.unreadCounts;
     return {
       messages: restMessages,
       unreadCounts: restUnread,
@@ -964,13 +964,16 @@ export function useWebSocket() {
           console.error('WebSocket error:', data.message);
           break;
 
-        case 'room_deleted':
-          // 房间被删除 — 清理本地状态，如果正在看该房间则跳转到聊天首页
-          useChatStore.getState().removeRoom(data.room_id);
-          if (useChatStore.getState().activeRoomId === data.room_id) {
+        case 'room_deleted': {
+          const deletedRoomId = data.room_id;
+          // 从 store 中移除该房间的消息和未读计数
+          useChatStore.getState().removeRoom(deletedRoomId);
+          // 如果当前正在看这个房间，跳转到聊天首页
+          if (useChatStore.getState().activeRoomId === deletedRoomId) {
             window.location.href = '/chat';
           }
           break;
+        }
       }
     } catch (e) {
       console.error('Failed to parse WebSocket message:', e);
@@ -980,6 +983,18 @@ export function useWebSocket() {
   // [WebSocket] 建立连接
   const connect = useCallback(() => {
     if (!isAuthenticated || !accessToken) return;
+
+    // [WebSocket] Token 过期检查 — 避免用过期 token 无限重连
+    try {
+      const payload = JSON.parse(atob(accessToken.split('.')[1]));
+      if (payload.exp * 1000 < Date.now()) {
+        console.warn('WebSocket: Access token expired, skipping connect');
+        return;
+      }
+    } catch (e) {
+      console.warn('WebSocket: Failed to parse token, skipping connect');
+      return;
+    }
 
     // 关闭旧连接（标记为手动关闭，避免 onclose 触发重连）
     if (wsRef.current) {
@@ -995,6 +1010,10 @@ export function useWebSocket() {
       setWsConnected(true);
       reconnectAttempt.current = 0;
       startHeartbeat();
+      // [WebSocket] 重连后自动重新 join 当前房间，确保后端 roomMembers 指向新 session
+      if (activeRoomId) {
+        joinRoom(activeRoomId);
+      }
     };
 
     ws.onmessage = handleServerMessage;
@@ -1019,9 +1038,9 @@ export function useWebSocket() {
     wsRef.current = ws;
   }, [isAuthenticated, accessToken]);
 
-  // [WebSocket] 生命周期管理 — 登录时连接，登出时断开
+  // [WebSocket] 生命周期管理 — 登录时连接，登出时断开，token 刷新时重连
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && accessToken) {
       connect();
     }
 
@@ -1034,7 +1053,7 @@ export function useWebSocket() {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, accessToken]);
 
   return {
     sendMessage,
@@ -1619,8 +1638,7 @@ export function PostDetailPage() {
   const isAuthor = isAuthenticated && user?.id === post.author_id;
 
   return (
-    // [排版] max-w-6xl 加宽正文列；px-4 保证小屏不贴边
-    <article className="max-w-6xl mx-auto px-4">
+    <article className="max-w-6xl mx-auto">
       <header className="mb-8">
         {/* [排版] 标题独自一行：占满容器宽度，不与按钮同行被挤压换行 */}
         <h1 className="text-4xl font-bold mb-4">{post.title}</h1>
@@ -2245,8 +2263,8 @@ Vite 代理已在 5.1.2 节配置：前端 `/api/*` 请求自动转发到后端 
 1. **注册**：点击页面右上角 "Register"，填写用户名/邮箱/密码，提交后应跳转到登录页
 2. **登录**：输入刚注册的邮箱和密码，登录成功后跳转到首页
 3. **浏览文章**：首页应显示文章列表（如果后端数据库中已有数据）
-4. **WebSocket 聊天**：进入聊天页面，应能看到默认聊天室列表（General、Tech Talk、Random）
-5. **加入聊天室**：点击任意聊天室，应能进入聊天界面并发送消息
+4. **WebSocket 聊天**：进入聊天页面，房间列表初始为空（本项目不预置默认聊天室，详见 Part 4 §4.11.4）；点击侧边栏右上角的 “+” 按钮创建一个房间
+5. **加入聊天室**：点击刚创建的聊天室，应能进入聊天界面并发送消息
 6. **实时推送**：打开第二个浏览器窗口登录另一账号，发送消息后第一个窗口应实时收到
 
 ### 5.10.4 常见问题

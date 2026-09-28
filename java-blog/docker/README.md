@@ -32,4 +32,13 @@ docker compose -f docker/docker-compose.yml down -v
 
 # 重建某个服务
 docker compose -f docker/docker-compose.yml up -d --build backend
+
+# 暂停所有容器（不删除，随时可 start 恢复）
+docker compose -f docker/docker-compose.yml stop
+
+# 重新启动被 stop 的容器
+docker compose -f docker/docker-compose.yml start
+
+# 重启所有容器
+docker compose -f docker/docker-compose.yml restart
 ```

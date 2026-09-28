@@ -159,6 +159,10 @@ export function useWebSocket() {
             setWsConnected(true);
             reconnectAttempt.current = 0;
             startHeartbeat();
+            // [WebSocket] 重连后自动重新 join 当前房间，确保后端 roomMembers 指向新 session
+            if (activeRoomId) {
+                joinRoom(activeRoomId);
+            }
         };
 
         ws.onmessage = handleServerMessage;

@@ -40,14 +40,14 @@
 新增目录结构：
 backend/src/main/java/com/blog/
 ├── events/                 # [+] Kafka 事件
-│   ├── EventProtocol.java  # 事件协议定义
 │   ├── KafkaEventProducer.java  # 事件生产者
 │   ├── SearchIndexer.java  # 搜索索引消费者
 │   └── NotifyWorker.java   # 通知消费者
 ├── ai/                     # [+] AI 能力（策略模式多 Provider 切换）
 │   ├── AiProvider.java          # 策略接口
 │   ├── AiProviderProperties.java # 多 Provider 配置属性
-│   ├── OpenAiCompatibleProvider.java # 通用 Provider（OpenAI / DeepSeek / Ollama / CCSwitch）
+│   ├── OpenAiCompatibleProvider.java # 通用 Provider（OpenAI / DeepSeek / CCSwitch 等 OpenAI 兼容服务）
+│   ├── OllamaProvider.java      # Ollama 原生 API Provider（nativeApi=true 时用，可关思考）
 │   ├── AIService.java           # AI 服务（持有所有 Provider，支持运行时切换）
 │   └── AIController.java        # AI API 控制器
 
@@ -294,6 +294,8 @@ public interface AiProvider {
 // [AI] 多 Provider 配置属性 — 从 application.yml 读取
 package com.blog.ai;
 
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -302,32 +304,19 @@ import java.util.Map;
 
 @Component
 @ConfigurationProperties(prefix = "app.ai")
+@Setter @Getter
 public class AiProviderProperties {
 
     private String defaultProvider = "ccswitch";
     private Map<String, ProviderConfig> providers = new HashMap<>();
 
-    public String getDefaultProvider() { return defaultProvider; }
-    public void setDefaultProvider(String defaultProvider) { this.defaultProvider = defaultProvider; }
-
-    public Map<String, ProviderConfig> getProviders() { return providers; }
-    public void setProviders(Map<String, ProviderConfig> providers) { this.providers = providers; }
-
+    @Setter @Getter
     public static class ProviderConfig {
         private String baseUrl;
         private String apiKey;
         private String model;
         /** 是否走 Ollama 原生 API（/api/chat + think:false）；思考模型必须为 true，默认 false 走 OpenAI 兼容层 */
         private boolean nativeApi = false;
-
-        public String getBaseUrl() { return baseUrl; }
-        public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
-        public String getApiKey() { return apiKey; }
-        public void setApiKey(String apiKey) { this.apiKey = apiKey; }
-        public String getModel() { return model; }
-        public void setModel(String model) { this.model = model; }
-        public boolean isNativeApi() { return nativeApi; }
-        public void setNativeApi(boolean nativeApi) { this.nativeApi = nativeApi; }
     }
 }
 ```
@@ -443,7 +432,7 @@ public class OllamaProvider implements AiProvider {
         this.model = model;
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
-                .defaultHeader("Authorization", "Bearer " + apiKey)
+                .defaultHeader("Authorization", "Bearer" + apiKey)
                 .build();
     }
 

@@ -631,11 +631,9 @@ public class PostService {
 // [Service] 评论业务逻辑 — 创建评论、查询评论树
 package com.blog.service;
 
-import com.blog.exception.BusinessException;
 import com.blog.model.Comment;
 import com.blog.repository.CommentRepository;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
@@ -662,9 +660,7 @@ public class CommentService {
         return topLevel;
     }
 
-    @Transactional
-    public Comment createComment(UUID postId, UUID authorId,
-                                 String content, String parentId) {
+    public Comment createComment(UUID postId, UUID authorId, String content, String parentId) {
         Comment comment = Comment.builder()
                 .postId(postId)
                 .authorId(authorId)
@@ -820,7 +816,6 @@ package com.blog.controller;
 
 import com.blog.dto.response.PageResponse;
 import com.blog.service.PostService;
-import org.springframework.data.domain.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -838,7 +833,7 @@ public class SearchController {
 
     // [GET] 全文搜索文章 — 使用 PostgreSQL tsvector 全文搜索
     @GetMapping
-    public ResponseEntity<PageResponse<Map<String, Object>>> search(
+    public ResponseEntity<PageResponse<Map<String, Object>>> searchPosts(
             @RequestParam("q") String query,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(value = "page_size", defaultValue = "20") int pageSize) {
@@ -882,8 +877,7 @@ public class WebConfig implements WebMvcConfigurer {
         public boolean preHandle(HttpServletRequest request,
                                  HttpServletResponse response, Object handler) {
             request.setAttribute("startTime", System.currentTimeMillis());
-            log.info("→ {} {} from {}", request.getMethod(),
-                    request.getRequestURI(), request.getRemoteAddr());
+            log.info("-> {} {} from {}", request.getMethod(), request.getRequestURI(), request.getRemoteAddr());
             return true;
         }
 
@@ -893,8 +887,7 @@ public class WebConfig implements WebMvcConfigurer {
                                     Object handler, Exception ex) {
             long start = (Long) request.getAttribute("startTime");
             long ms = System.currentTimeMillis() - start;
-            log.info("← {} {} {}ms {}", request.getMethod(),
-                    request.getRequestURI(), ms, response.getStatus());
+            log.info("<- {} {} {}ms {}", request.getMethod(), request.getRequestURI(), ms, response.getStatus());
         }
     }
 }

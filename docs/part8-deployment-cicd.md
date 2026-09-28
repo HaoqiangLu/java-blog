@@ -309,7 +309,7 @@ services:
     networks:
       - blog-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-bloguser}"]
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-bloguser} -d ${PG_DATABASE:-blogdb}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -384,6 +384,10 @@ services:
       - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       - APP_JWT_EXPIRATION=${JWT_EXPIRATION:-3600}
       - APP_JWT_REFRESH_EXPIRATION=${JWT_REFRESH_EXPIRATION:-604800}
+      - CORS_ORIGIN=${CORS_ORIGIN:-https://myblog.local:4443}
+      # [AI] Ollama 跑在宿主机：容器内 localhost 指向容器自己，连不到宿主机 11434，
+      #      必须用 Docker Desktop 提供的宿主机特殊域名覆盖（relaxed binding 对应 app.ai.providers.ollama.base-url）
+      - APP_AI_PROVIDERS_OLLAMA_BASEURL=http://host.docker.internal:11434
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     depends_on:
@@ -404,7 +408,7 @@ services:
       args:
         # [Vite] 构建时注入 WS 地址：经 nginx 反代到后端 /ws/chat。
         #        HTTPS 场景（mkcert）必须是 wss://；纯 HTTP 场景改成 ws://myblog.local/ws/chat
-        VITE_WS_URL: ${VITE_WS_URL:-wss://myblog.local/ws/chat}
+        VITE_WS_URL: ${VITE_WS_URL:-wss://myblog.local:4443/ws/chat}
     container_name: blog-frontend
     restart: unless-stopped
     networks:
@@ -416,8 +420,8 @@ services:
     container_name: blog-nginx
     restart: unless-stopped
     ports:
-      - "${HTTP_PORT:-80}:80"
-      - "${HTTPS_PORT:-443}:443"
+      - "${HTTP_PORT:-8081}:80"
+      - "${HTTPS_PORT:-4443}:443"
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ../nginx/ssl:/etc/nginx/ssl:ro
@@ -448,6 +452,7 @@ events {
 }
 
 http {
+    resolver 127.0.0.11 valid=10s;
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
@@ -481,14 +486,6 @@ http {
     add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss:;" always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
 
-    upstream backend {
-        server backend:8080;
-    }
-
-    upstream frontend {
-        server frontend:80;
-    }
-
     server {
         listen 80;
         server_name your-domain.com www.your-domain.com;
@@ -518,7 +515,7 @@ http {
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
         location / {
-            proxy_pass http://frontend;
+            proxy_pass http://frontend:80;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -527,7 +524,7 @@ http {
 
         # [Nginx] /api 路径 — 代理到 Spring Boot 后端
         location /api/ {
-            proxy_pass http://backend;
+            proxy_pass http://backend:8080;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -540,7 +537,7 @@ http {
 
         # [Nginx] WebSocket 升级 — HTTP → WebSocket 协议转换
         location /ws/ {
-            proxy_pass http://backend;
+            proxy_pass http://backend:8080;
             proxy_http_version 1.1;
 
             proxy_set_header Upgrade $http_upgrade;
@@ -555,7 +552,7 @@ http {
         }
 
         location /api/health {
-            proxy_pass http://backend;
+            proxy_pass http://backend:8080;
             access_log off;
         }
     }
@@ -628,9 +625,9 @@ mkcert myblog.local localhost 127.0.0.1
 
 §8.1-8.6 的所有文件已创建完毕，按下述顺序启动并验证：
 
-1. **修改 `nginx/nginx.conf`**：取 §8.6 内容，做四处本地化修改——① 两处 `server_name your-domain.com www.your-domain.com;`（80 与 443）改为 `server_name myblog.local;`；② `ssl_certificate` 改为 `/etc/nginx/ssl/myblog.local+2.pem`；③ `ssl_certificate_key` 改为 `/etc/nginx/ssl/myblog.local+2-key.pem`；④ 删除 `location /.well-known/acme-challenge/ { root /var/www/certbot; }` 段（本地无 certbot）。
+1. **修改 `nginx/nginx.conf`**：取 §8.6 内容，做五处本地化修改——① 两处 `server_name your-domain.com www.your-domain.com;`（80 与 443）改为 `server_name myblog.local;`；② `ssl_certificate` 改为 `/etc/nginx/ssl/myblog.local+2.pem`；③ `ssl_certificate_key` 改为 `/etc/nginx/ssl/myblog.local+2-key.pem`；④ 删除 `location /.well-known/acme-challenge/ { root /var/www/certbot; }` 段（本地无 certbot）；⑤ 80 端口 server 块的 `return 301 https://$server_name$request_uri;` 改为 `return 301 https://$server_name:4443$request_uri;`（本地 HTTPS 走 4443 端口，规避 Windows 对 443 的占用）。
 2. **确认 `docker/` 下 4 个文件已创建**：`Dockerfile.backend`（§8.3）、`Dockerfile.frontend`（§8.4）、`frontend-nginx.conf`（§8.4）、`docker-compose.yml`（§8.5）。
-3. **确认 `.env` 已创建**（§8.1）：`CORS_ORIGIN=https://myblog.local`、`VITE_WS_URL=wss://myblog.local/ws/chat`。
+3. **确认 `.env` 已创建**（§8.1，按本地端口方案修改）：`HTTP_PORT=8081`、`HTTPS_PORT=4443`、`CORS_ORIGIN=https://myblog.local:4443`、`VITE_WS_URL=wss://myblog.local:4443/ws/chat`（本地用 8081/4443 规避 Windows Hyper-V/WinNAT 对 80/443 的占用）。
 4. **确认 `application-prod.yml` 已创建**（§8.2.2）：`ddl-auto: validate` + Flyway 启用。§8.3 的 `docker/Dockerfile.backend` 最后一行 `CMD` 已带 `--spring.profiles.active=prod`，容器启动时 Spring Boot 会自动加载此文件，首次启动由 Flyway 建表。
 5. **清理旧容器**（Part 2/7 用 `docker run` 起过的同名容器会与 compose 冲突）：
    ```powershell
@@ -646,7 +643,7 @@ mkcert myblog.local localhost 127.0.0.1
    docker compose -f docker/docker-compose.yml ps
    docker compose -f docker/docker-compose.yml logs -f backend
    ```
-   后端日志出现 `Started Application` 且无 `validate` 报错后，Windows 浏览器访问 **`https://myblog.local`**：显示安全锁 + 前端页面即成功；聊天页能连上 `wss://myblog.local/ws/chat` 说明 WebSocket 经 nginx 升级成功。
+   后端日志出现 `Started Application` 且无 `validate` 报错后，Windows 浏览器访问 **`https://myblog.local:4443`**：显示安全锁 + 前端页面即成功；聊天页能连上 `wss://myblog.local:4443/ws/chat` 说明 WebSocket 经 nginx 升级成功。
 
 8. **停止服务**（保留容器和数据卷，下次 `up` 秒启）：
    ```powershell
@@ -810,6 +807,8 @@ services:
       - APP_JWT_EXPIRATION=${JWT_EXPIRATION}
       - APP_JWT_REFRESH_EXPIRATION=${JWT_REFRESH_EXPIRATION}
       - CORS_ORIGIN=${CORS_ORIGIN}
+      # [AI] 同 §8.5：容器内 localhost 连不到宿主机 Ollama，用宿主机特殊域名覆盖
+      - APP_AI_PROVIDERS_OLLAMA_BASEURL=http://host.docker.internal:11434
     networks:
       - blog-network
     depends_on:

@@ -432,28 +432,41 @@ git branch -m main
 
 ```gitignore
 # java-blog/.gitignore
-# ---- IDE ----
-# 匹配任意层级的 .idea 目录（含 java-blog/.idea 与 backend/.idea）
+# Java 构建产物
+backend/target/
+frontend/node_modules/
+frontend/dist/
+
+# IDE
 .idea/
 *.iml
-*.iws
-*.ipr
-out/
 .vscode/
+*.swp
+*.swo
 
-# ---- 构建产物（各子目录内部另有自己的 .gitignore 兑底）----
-target/
-
-# ---- 环境变量 / 日志 / OS ----
-.env
-logs/
-*.log
+# OS
 .DS_Store
 Thumbs.db
+
+# 环境配置
+.env
+.env.local
+.env.production
+
+# 日志
+*.log
+
+# SSL 证书（本地生成，不应提交）
+# 忽略 ssl 目录下的所有直接文件/子目录
+nginx/ssl/*
+# 不忽略 .gitkeep 占位文件（保证目录结构被提交）
+!nginx/ssl/.gitkeep
 ```
 
+> **说明**：上面的 `frontend/node_modules`、`frontend/dist`、`nginx/ssl/*` 等条目对应的目录分别在 **Part 5**（前端脚手架）与 **Part 8**（Nginx + mkcert 证书）才创建；在 Part 1 阶段这些路径尚不存在，写入 `.gitignore` 不会报错，提前列全可保证后续各 Part 生成的敏感文件（尤其 SSL 私钥）始终不被误提交。
+
 提交前用 `git status` 确认 `.idea/`、`target/` 均未出现在待提交列表中。
-frontend 无需在此处处理：Part 5 的 create-vite 脚手架会自动生成 `frontend/.gitignore`，已含 `node_modules`。
+此外 Part 5 的 create-vite 脚手架还会自动生成 `frontend/.gitignore`（已含 `node_modules`），与根级 `.gitignore` 的 `frontend/node_modules/` 形成双重兑底，互不冲突。
 
 ---
 
