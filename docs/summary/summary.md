@@ -11,11 +11,13 @@
 ## 0. 4443 端口先落到 nginx 容器，不是 Java
 
 [docker-compose.yml](../../java-blog/docker/docker-compose.yml)
+
 - nginx 服务映射了 [${HTTPS_PORT:-4443}:443](../../java-blog/docker/docker-compose.yml#L141)
   —— 浏览器连 `IP:4443`，Dokcer 把包转发进 nginx 容器的 `443`。
 - 所以**第一个收到请求的进程是 nginx，Java 此时完全不知情**
 
 [nginx.conf](../../java-blog/nginx/nginx.conf)
+
 [`listen 443 ssl`](../../java-blog/nginx/nginx.conf#L56) 做 TLS 解密，然后**按 URL 路径分流** —— 这是后端“被知道”的唯一入口条件：
 | 浏览器请求的路径 | nginx 转发到 | 谁处理 |
 |-----------------|-------------|--------|
@@ -256,9 +258,9 @@ flowchart LR
     URL["URL: ?status=published&page=1&page_size=10"] --> S1
     URL --> S2
     URL --> S3
-    S1["取到字符串 &quot;published&quot;<br/>参数名 = 变量名 status"] --> V1["String status = &quot;published&quot;<br/>直接赋值"]
-    S2["取到字符串 &quot;1&quot;<br/>参数名 = 变量名 page"] --> V2["int page = 1<br/>Integer.parseInt 转换"]
-    S3["取到字符串 &quot;10&quot;<br/>参数名 = @RequestParam 指定的 page_size"] --> V3["int pageSize = 10<br/>Integer.parseInt 转换"]
+    S1["取到字符串 #quot;published#quot;<br/>参数名 = 变量名 status"] --> V1["String status = #quot;published#quot;<br/>直接赋值"]
+    S2["取到字符串 #quot;1#quot;<br/>参数名 = 变量名 page"] --> V2["int page = 1<br/>Integer.parseInt 转换"]
+    S3["取到字符串 #quot;10#quot;<br/>参数名 = @RequestParam 指定的 page_size"] --> V3["int pageSize = 10<br/>Integer.parseInt 转换"]
 ```
 
 **名字匹配规则**：
@@ -276,15 +278,15 @@ URL 里取出来的永远是**字符串**，Spring 按参数声明的类型自�
 
 ```mermaid
 flowchart LR
-    Body["请求体<br/>{&quot;title&quot;:&quot;Hello&quot;,&quot;tags&quot;:[&quot;java&quot;]}"] -->|"Jackson<br/>MappingJackson2HttpMessageConverter"| Obj["CreatePostRequest 对象"]
-    
+    Body["请求体<br/>{#quot;title#quot;:#quot;Hello#quot;,#quot;tags#quot;:[#quot;java#quot;]}"] -->|"Jackson<br/>MappingJackson2HttpMessageConverter"| Obj["CreatePostRequest 对象"]
+
     subgraph Jackson内部过程
         direction LR
         J1["1. 读取 JSON 字节流为文本"] --> J2["2. 解析 JSON 为树结构（JsonNode）"]
         J2 --> J3["3. new CreatePostRequest()（无参构造）"]
-        J3 --> J4["4. 按 JSON 键名找对应 setter<br/>title → setTitle(&quot;Hello&quot;)<br/>tags → setTags([&quot;java&quot;])"]
+        J3 --> J4["4. 按 JSON 键名找对应 setter<br/>title → setTitle(#quot;Hello#quot;)<br/>tags → setTags([#quot;java#quot;])"]
     end
-    
+
     Body -.-> Jackson内部过程
     Jackson内部过程 --> Obj
 ```
@@ -355,7 +357,7 @@ flowchart LR
   }
 }}%%
 flowchart TD
-    A["Java 代码<br/>Post post = Post.builder().title(&quot;Hello&quot;).build();<br/>repository.save(post);"] -->|"① Hibernate 检查实体映射"| B["根据 @Entity/@Table 确定目标表名 posts<br/>根据 @Column 确定各字段名"]
+    A["Java 代码<br/>Post post = Post.builder().title(#quot;Hello#quot;).build();<br/>repository.save(post);"] -->|"① Hibernate 检查实体映射"| B["根据 @Entity/@Table 确定目标表名 posts<br/>根据 @Column 确定各字段名"]
     B -->|"② 生成 SQL"| C["INSERT INTO posts (id, title, ...) VALUES (?, ?, ...)"]
     C -->|"③ 参数绑定"| D["PreparedStatement 把 Java 值 设进 SQL 的 ? 占位符<br/>UUID → bytea/uuid<br/>String → varchar<br/>Instant → timestamp"]
     D -->|"④ HikariCP 提供连接"| E["JDBC 执行 SQL<br/>发送到 PostgreSQL"]
@@ -391,7 +393,7 @@ flowchart TD
     A["Java 代码<br/>Optional<Post> p = repository.findById(uuid);"] -->|"① 方法名翻译"| B["Hibernate 生成 SQL<br/>SELECT id, title, author_id, ... FROM posts WHERE id = ?"]
     B -->|"② 执行查询"| C["PostgreSQL 返回 ResultSet（零行或一行）"]
     C -->|"③ ResultSet → Java 类型映射"| D["uuid → UUID<br/>varchar → String<br/>timestamp → Instant<br/>text[] → List<String>"]
-    D -->|"④ 填充对象"| E["new Post()<br/>setId(uuid)<br/>setTitle(&quot;Hello&quot;)<br/>setAuthorId(...)<br/>..."]
+    D -->|"④ 填充对象"| E["new Post()<br/>setId(uuid)<br/>setTitle(#quot;Hello#quot;)<br/>setAuthorId(...)<br/>..."]
     E --> F["返回 Optional<Post>"]
 ```
 
