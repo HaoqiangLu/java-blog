@@ -4,6 +4,64 @@
 
 ---
 
+# 〇、浏览器到Java流程认知
+
+`https://myblog.local:4443` 这个请求分两种情况：**页面本身和页面里发出的 API 调用** —— 后端 Java 代码只能“感知”到后者。
+
+## 0. 4443 端口先落到 nginx 容器，不是 Java
+
+[docker-compose.yml](../../java-blog/docker/docker-compose.yml)
+- nginx 服务映射了 [${HTTPS_PORT:-4443}:443](../../java-blog/docker/docker-compose.yml#L141)
+  —— 浏览器连 `IP:4443`，Dokcer 把包转发进 nginx 容器的 `443`。
+- 所以**第一个收到请求的进程是 nginx，Java 此时完全不知情**
+
+[nginx.conf](../../java-blog/nginx/nginx.conf)
+[`listen 443 ssl`](../../java-blog/nginx/nginx.conf#L56) 做 TLS 解密，然后**按 URL 路径分流** —— 这是后端“被知道”的唯一入口条件：
+| 浏览器请求的路径 | nginx 转发到 | 谁处理 |
+|-----------------|-------------|--------|
+| `/`（首页、文章页等）| `http://frontend:80` | 前端 nginx，**Java 不参与** |
+| `/api/**` | `http://backend:8080` | **Spring Boot** |
+| `/ws/**` | `http://backend:8080`（带 Upgrade 头） | **Spring Boot WebSocket** |
+
+
+前端：
+React 里 `axios` 请求都写成 `/api/xxx` 开头（见 [axios.ts](../../java-blog/frontend/src/api/axios.ts)），`/api` 这个前缀就是“触发后端”的开关。
+访问 `https://myblog.local:4443` 看到的 HTML 页面本身根本不经过 Java —— Java 是在浏览器加载完 JS 后、JS 发起 `/api/posts?...` 这类请求时才第一次收到包。
+
+## 1. 请求被 Java “知道”
+backend 容器[映射了 8080](../../java-blog/docker/docker-compose.yml#L108-L109)，nginx 把 `/api/posts` 的包原样转发到 `backend:8080`。此时进入 Spring Boot 进程，顺序是：
+1. **内嵌 Tomcat 监听 8080**（server.port: 8080，Spring Boot 默认，application.yml 没改它），收包、解析出 HTTP 报文：方法(GET/POST)、路径(`/api/posts`)、Header(`Authorization`、`Content-Type`)、Body。
+2. **Security 过滤器链**：[SecurityConfig.filterChain()](../../java-blog/backend/src/main/java/com/blog/config/SecurityConfig.java#L40-L61) 这段代码就是 **“安检名单”** ——
+   - `/api/posts/**` 的 GET 是 [permitAll()](../../java-blog/backend/src/main/java/com/blog/config/SecurityConfig.java#L51) 直接放行；
+   - `/api/posts/my-posts`、**所有 POST/PUT/DELETE** 走 [anyRequest().authenticated()](../../java-blog/backend/src/main/java/com/blog/config/SecurityConfig.java#L57)，没登录就在这里被拒(401/403)，**根本到不了 Controller**。
+3. [JwtAuthenticationFilter](../../java-blog/backend/src/main/java/com/blog/security/JwtAuthenticationFilter.java#L30-L53)：从 `Authorization: Bearer xxx` 头里扣出 token，验签、解出 `userId` 塞进 `SecurityContextHolder`。这一步决定了后面 Controller 里的 `auth.getPrincipal()` 能不能拿到“你是谁”。
+4. DispatcherServlet 按路径找方法：这就是“如何知道返回什么”的第一半答案 —— URL 到 Java 方法的映射完全是注解写死的：
+    ```java
+    @RestController
+    @RequestMapping("/api/posts")      // ← nginx 转来的路径 /api/posts 匹配到这里
+    public class PostController {
+        @GetMapping                    // ← GET 方法 → listPosts()
+        @GetMapping("/{id}")           // ← GET /api/posts/3f2a... → getPost()
+        @PostMapping                   // ← POST /api/posts → createPost()
+    ```
+
+比如浏览器(React)发 `GET /api/posts?page=1&page_size=20`，命中的就是 [listPosts()](../../java-blog/backend/src/main/java/com/blog/controller/PostController.java#L30)，page_size 由 `RequestParam(value = "page_size")` 接进 pageSize 参数，路径里的 [`{id}` 由 `@PathVariable`](../../java-blog/backend/src/main/java/com/blog/controller/PostController.java#L50) 接住
+
+## 2. 返回什么内容由谁决定
+沿着 [listPosts()](../../java-blog/backend/src/main/java/com/blog/controller/PostController.java#L30) 往下：
+- **数据内容**：`postService.listPosts(...)` → Repository 查 PostgreSQL → 组装成 `PageResponse<Map<String,Object>>`
+- **JSON 格式**：方法上的 [@RestController](../../java-blog/backend/src/main/java/com/blog/controller/PostController.java#L15) (= `@Controller` + `@ResponseBody`) 告诉 Spring：返回值不要当页面渲染，直接用 Jackson 序列化成 JSON 写进响应体，`Content-Type: application/json`
+- **HTTP 状态码**：`ResponseEntity.ok(...)`=200；[GlobalExceptionHandler](../../java-blog/backend/src/main/java/com/blog/exception/GlobalExceptionHandler.java) 里声明的异常映射决定出错时返回什么码和什么 JSON
+
+响应沿原路返回：Tomcat 写出字节 → nginx 收到后回给浏览器（HTTPS 场景由 nginx 重新加密） → 浏览器 JS 拿到 JSON。
+**nginx 和 Java 都不“记住”这个请求** —— [`SessionCreationPolicy.STATELESS`](../../java-blog/backend/src/main/java/com/blog/config/SecurityConfig.java#L45) 就是这个意思，下一个请求来了全部从头再走一遍。
+
+
+## 例外：WebSocket（聊天）
+`wss://myblog.local:4443/ws/chat`（docker-compose 里构建时注入给前端的 [VITE_WS_URL](../../java-blog/docker/docker-compose.yml#L126-L128)）走 nginx 的 [`location /ws/`，那段配置](../../java-blog/nginx/nginx.conf#L92-L105)把 HTTP 请求头改写成 WebSocket 升级握手转发给 8080。Java 侧由 [WebSocketConfig](../../java-blog/backend/src/main/java/com/blog/config/WebSocketConfig.java) 注册 `/ws/chat` → `ChatWebSocketHandler`，这条链路不是“一问一答”，连接建立后 Java 可以主动往这条 TCP 连接里推消息 —— 这是它和上面 `/api` 流程的本质区别。
+
+---
+
 # 一、Spring Boot
 
 ## 1. `@SpringBootApplication` （核心组合注解）
@@ -61,16 +119,22 @@ public class Application {
 ```java
 package com.blog.controller;   // 位于启动类所在包 com.blog 的子包，会被自动扫描
 
-// ...
-
 @RestController                // 被 @ComponentScan 发现并注册为 Bean
+@RequestMapping("/api")        // 类级别公共路径前缀
 public class HealthController {
-    @GetMapping("/api/health") // 自动映射为 HTTP 接口
-    public String health() {
-        return "UP";
+
+    @GetMapping("/health")     // 完整路径 = 类前缀 + 方法路径 = /api/health
+    public ResponseEntity<Map<String, Object>> health() {
+        return ResponseEntity.ok(Map.of(
+                "status", "UP",
+                "timestamp", Instant.now().toString(),
+                "service", "blog-platform"
+        ));
     }
 }
 ```
+
+> **关于返回类型 `ResponseEntity<Map<String, Object>>`**：本项目中 Controller 的接口**并非全部**返回 `ResponseEntity<Map<String, Object>>` 类型。`HealthController` 之所以这样写，是因为健康检查接口需要在一个响应体里同时返回多个字段（`status`、`timestamp`、`service`），所以用 `Map<String, Object>` 组装一个灵活的 JSON 对象，再用 `ResponseEntity.ok(...)` 包装成 HTTP 200 响应。其他业务接口（如文章、用户、评论等）通常返回**自定义 DTO 对象**（如 `PostResponse`、`LoginResponse`）或直接返回 `ResponseEntity<XxxDTO>`，类型由具体业务决定，不统一使用 `Map`。
 
 **使用说明**：`@SpringBootApplication` 是一个**类级注解**（`@Target(ElementType.TYPE)`），只能标注在类上，不能标注在方法或字段上。有几个的关键点：
 1. **不强制与 `main` 同类**：注解标注的类和 `main()` 所在的类可以是两个不同的类。`main()` 只是 JVM 入口，真正决定应用行为的是 `SpringApplication.run(Xxx.class, args)` 的第一个参数。
@@ -133,7 +197,7 @@ SpringApplication.run(Application.class, args);
 一个前端请求从「网络字节流」变成「Controller 方法里的 Java 变量」，中间经过了三层转换。每一层各管一件事：
 
 ```mermaid
-flowchart TD
+flowchart LR
     A["浏览器发出 HTTP 请求<br/>（URL + Headers + Body）"] -->|"TCP 字节流"| B["Tomcat<br/>解析 HTTP 协议"]
     B -->|"HttpServletRequest 对象"| C["DispatcherServlet<br/>查路由表，找到对应的 Controller 方法"]
     C -->|"HandlerMethod + 请求对象"| D["参数解析器<br/>把请求的各部分塞进方法参数"]
@@ -188,7 +252,7 @@ Spring MVC 为 Controller 方法的每个参数分配一个**参数解析器**�
 前端发 `GET /api/posts?status=published&page=1&page_size=10`，Spring 逐个参数从 URL 里按名字取：
 
 ```mermaid
-flowchart TD
+flowchart LR
     URL["URL: ?status=published&page=1&page_size=10"] --> S1
     URL --> S2
     URL --> S3
@@ -215,7 +279,7 @@ flowchart LR
     Body["请求体<br/>{&quot;title&quot;:&quot;Hello&quot;,&quot;tags&quot;:[&quot;java&quot;]}"] -->|"Jackson<br/>MappingJackson2HttpMessageConverter"| Obj["CreatePostRequest 对象"]
     
     subgraph Jackson内部过程
-        direction TB
+        direction LR
         J1["1. 读取 JSON 字节流为文本"] --> J2["2. 解析 JSON 为树结构（JsonNode）"]
         J2 --> J3["3. new CreatePostRequest()（无参构造）"]
         J3 --> J4["4. 按 JSON 键名找对应 setter<br/>title → setTitle(&quot;Hello&quot;)<br/>tags → setTags([&quot;java&quot;])"]
@@ -282,10 +346,18 @@ flowchart LR
 以 `postRepository.save(post)` 为例：
 
 ```mermaid
+%%{init: {
+  "flowchart": {
+    "minNodeWidth": 0,
+    "wrappingWidth": 9999,
+    "nodeSpacing": 20,
+    "rankSpacing": 40
+  }
+}}%%
 flowchart TD
-    A["Java 代码<br/>Post post = Post.builder()<br/>.title(&quot;Hello&quot;).build();<br/>repository.save(post);"] -->|"① Hibernate 检查实体映射"| B["根据 @Entity/@Table 确定目标表名 posts<br/>根据 @Column 确定各字段名"]
-    B -->|"② 生成 SQL"| C["INSERT INTO posts (id, title, ...)<br/>VALUES (?, ?, ...)"]
-    C -->|"③ 参数绑定"| D["PreparedStatement 把 Java 值<br/>设进 SQL 的 ? 占位符<br/>UUID → bytea/uuid<br/>String → varchar<br/>Instant → timestamp"]
+    A["Java 代码<br/>Post post = Post.builder().title(&quot;Hello&quot;).build();<br/>repository.save(post);"] -->|"① Hibernate 检查实体映射"| B["根据 @Entity/@Table 确定目标表名 posts<br/>根据 @Column 确定各字段名"]
+    B -->|"② 生成 SQL"| C["INSERT INTO posts (id, title, ...) VALUES (?, ?, ...)"]
+    C -->|"③ 参数绑定"| D["PreparedStatement 把 Java 值 设进 SQL 的 ? 占位符<br/>UUID → bytea/uuid<br/>String → varchar<br/>Instant → timestamp"]
     D -->|"④ HikariCP 提供连接"| E["JDBC 执行 SQL<br/>发送到 PostgreSQL"]
     E -->|"⑤ 数据库返回"| F["INSERT 成功<br/>（若有 GENERATED KEY 则返回新 id）"]
     F -->|"⑥ Hibernate 回填"| G["把数据库生成的 id 写回 post 对象<br/>post.getId() 现在有值了"]
@@ -307,9 +379,17 @@ flowchart TD
 以 `postRepository.findById(id)` 为例：
 
 ```mermaid
+%%{init: {
+  "flowchart": {
+    "minNodeWidth": 0,
+    "wrappingWidth": 9999,
+    "nodeSpacing": 20,
+    "rankSpacing": 40
+  }
+}}%%
 flowchart TD
-    A["Java 代码<br/>Optional<Post> p =<br/>repository.findById(uuid);"] -->|"① 方法名翻译"| B["Hibernate 生成 SQL<br/>SELECT id, title, author_id, ...<br/>FROM posts WHERE id = ?"]
-    B -->|"② 执行查询"| C["PostgreSQL 返回 ResultSet<br/>（零行或一行）"]
+    A["Java 代码<br/>Optional<Post> p = repository.findById(uuid);"] -->|"① 方法名翻译"| B["Hibernate 生成 SQL<br/>SELECT id, title, author_id, ... FROM posts WHERE id = ?"]
+    B -->|"② 执行查询"| C["PostgreSQL 返回 ResultSet（零行或一行）"]
     C -->|"③ ResultSet → Java 类型映射"| D["uuid → UUID<br/>varchar → String<br/>timestamp → Instant<br/>text[] → List<String>"]
     D -->|"④ 填充对象"| E["new Post()<br/>setId(uuid)<br/>setTitle(&quot;Hello&quot;)<br/>setAuthorId(...)<br/>..."]
     E --> F["返回 Optional<Post>"]

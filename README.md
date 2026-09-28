@@ -22,7 +22,7 @@
 | 数据库 | PostgreSQL 17（Flyway 迁移）、Redis 7（Token 黑名单 / Pub/Sub） |
 | 消息队列 | Kafka（KRaft 模式） |
 | 扩展 | AI 助手（Ollama / 本地代理）、Actuator + Micrometer 可观测性 |
-| 部署 | Docker Compose、Kubernetes（Kustomize + Nginx Ingress + HPA）、GitHub Actions CI/CD |
+| 部署 | Docker Compose、Kubernetes（Kustomize + Nginx Ingress + HPA）、GitHub Actions CI/CD（可选，未实践） |
 | 开发工具 | IntelliJ IDEA、Maven 3.9、pnpm、Node.js 24、Git |
 
 ---
@@ -35,7 +35,7 @@
 - **前端应用**：React SPA、服务端状态管理、受保护路由、深色模式
 - **安全加固**：CORS、XSS 防护、接口限流、安全响应头、方法级权限（`@PreAuthorize`）
 - **功能扩展**：AI 聊天助手、Kafka 事件流、Actuator 监控指标
-- **部署上线**：Docker 多阶段构建、docker-compose 一键启动、Kubernetes 集群部署、GitHub Actions 自动化流水线
+- **部署上线**：Docker 多阶段构建、docker-compose 一键启动、Kubernetes 集群部署（跟docker compose会有冲突）、<del>GitHub Actions 自动化流水线（我没有去弄）</del>
 
 ---
 
@@ -61,7 +61,7 @@
 - [technical-deep-dive.md](docs/technical-deep-dive.md)：每项技术的原理详解，遇到不理解的技术时随时查阅。
 - [docs/summary/](docs/summary/)：阶段性复盘总结。
 
-> Part 8（Docker Compose）与 Part 9（Kubernetes）是同一部署目标的两种方案，**二选一即可**。
+> Part 8（Docker Compose）与 Part 9（Kubernetes）是同一部署目标的两种方案，**逻辑上二选一即可，但不能同时运行**：两者共享同一个 Docker 引擎，同时跑会端口 / 资源冲突，切换前先执行 `docker compose down` 停掉 Part 8 的容器。
 
 ---
 
@@ -76,7 +76,7 @@ cd java-blog
 docker compose -f docker/docker-compose.yml up -d --build
 ```
 
-访问：<https://myblog.local>
+访问：<https://myblog.local:4443>
 
 ### Kubernetes
 

@@ -12,7 +12,7 @@ Part 8（Docker Compose）和 Part 9（Kubernetes）解决的是同一个问题�
 - **Part 8 适合个人博客 / 开发环境**：一台机器，`docker-compose up` 一条命令启动所有服务
 - **Part 9 适合生产级 / 企业级**：多台机器集群，自动扩缩容、滚动更新、服务发现
 
-两者**不冲突也不叠加——选一个用即可**。本教程两个都写，是为了让你了解从单机到集群的完整路径。
+两者**逻辑上二选一即可，但不能同时运行**：Docker Desktop 的 Kubernetes 与 Docker Compose 共享同一个 Docker 引擎，两边同时跑会端口 / 资源冲突（如 Ingress Controller 绑 80/443 与 nginx 容器抢占）。切换前先执行 `docker compose down` 停掉 Part 8 的容器。本教程两个都写，是为了让你了解从单机到集群的完整路径。
 如果你的目标只是“博客能跑起来”，做完 Part 8 就够了，Part 9 可以跳过。
 
 ---
@@ -1199,6 +1199,12 @@ images:
 > 以下命令均在 `java-blog/` 目录下执行（`k8s/` 目录位于此），先切换目录：
 > ```powershell
 > cd D:\Program\Java\blog-project\java-blog
+> ```
+
+> ⚠️ **部署前置检查**：确认 Part 8 的 compose 容器已全部停止（两者共享同一个 Docker 引擎，同时运行会端口 / 资源冲突）：
+> ```powershell
+> docker compose --env-file .env -f docker/docker-compose.yml down
+> docker ps   # 确认无 blog- 前缀的 compose 容器在运行
 > ```
 
 **方式 A：一条命令全部署**（推荐）
